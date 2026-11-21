@@ -44,7 +44,8 @@ function blank() {
     areas: DEFAULT_AREAS.map(([k, icon, color], i) => ({ id: 'a_' + k, key: k, icon, color, score: 6, order: i })),
     tasks: [], projects: [], notes: [], habits: [], goals: [], events: [], tx: [], library: [],
     journal: {}, health: {}, budgets: {}, daily: {}, reviews: {}, focus: [], scratch: '',
-    content: [], people: [], lists: [], subs: [], deleted: {}, metaU: {}
+    content: [], people: [], lists: [], subs: [], boards: [], deleted: {}, metaU: {},
+    forest: { coins: 0, unlocked: ['pine'], species: 'pine', tags: null, strict: true, sound: 'none' }
   };
 }
 function seed() {
@@ -52,11 +53,14 @@ function seed() {
   let dn = 0; const P = (o) => Object.assign({ id: 'demo_' + (++dn), createdAt: Date.now() - dn * 6e4, demo: true }, o);
   const pr1 = P({ title: L === 'fa' ? 'ساخت مغز دوم' : 'Build Second Brain', areaId: 'a_creative', status: 'active', deadline: addDays(d, 20), color: '#5eead4', desc: '' });
   const pr2 = P({ title: L === 'fa' ? 'سایت پورتفولیو' : 'Portfolio website', areaId: 'a_work', status: 'active', deadline: addDays(d, 35), color: '#e9c78f', desc: '' });
-  s.projects = [pr1, pr2];
+  const pr3 = P({ title: 'ONYQ', areaId: 'a_work', areaIds: ['a_work', 'a_finance'], status: 'active', deadline: '', color: '#b9a2ff', desc: L === 'fa' ? 'مجموعه نرم‌افزاری' : 'Software studio' });
+  const pr4 = P({ title: 'Childoo', parentId: pr3.id, areaId: 'a_work', status: 'active', deadline: addDays(d, 45), color: '#74e3a9', desc: '' });
+  pr1.parentId = pr3.id;
+  s.projects = [pr3, pr1, pr4, pr2];
   const fa = L === 'fa';
   s.tasks = [
     P({ title: fa ? 'طراحی ساختار دیتابیس داشبورد' : 'Design dashboard data model', due: d, priority: 1, status: 'todo', areaId: 'a_creative', projectId: pr1.id }),
-    P({ title: fa ? 'تدوین ریلز کلاینت' : 'Edit client reel', due: d, priority: 2, status: 'todo', areaId: 'a_work', time: '15:00' }),
+    P({ title: fa ? 'تدوین ریلز کلاینت' : 'Edit client reel', due: d, priority: 2, status: 'todo', areaId: 'a_work', areaIds: ['a_work', 'a_finance', 'a_learning'], time: '15:00', endTime: '17:00' }),
     P({ title: fa ? 'پیاده‌روی ۳۰ دقیقه' : '30-minute walk', due: d, priority: 3, status: 'done', doneAt: Date.now(), areaId: 'a_health' }),
     P({ title: fa ? 'انتخاب ۱۰ نمونه کار برتر' : 'Pick top 10 portfolio pieces', due: addDays(d, 2), priority: 2, status: 'todo', areaId: 'a_work', projectId: pr2.id }),
     P({ title: fa ? 'پرداخت قبض اینترنت' : 'Pay internet bill', due: addDays(d, -1), priority: 1, status: 'todo', areaId: 'a_finance' }),
@@ -97,15 +101,31 @@ function seed() {
 }
 function migrate(s) {
   const b = blank();
+  (s.tasks || []).forEach(x => { if (x.areaId && !x.areaIds) x.areaIds = [x.areaId]; });
+  (s.projects || []).forEach(x => { if (x.areaId && !x.areaIds) x.areaIds = [x.areaId]; });
   for (const k in b) if (s[k] === undefined) s[k] = b[k];
   s.settings = Object.assign(b.settings, s.settings || {});
   (s.focus || []).forEach(f => { if (!f.id) f.id = 'f' + (f.at || Math.random()); });
+  if (!s.boards) s.boards = []; if (!s.forest) s.forest = { coins: 0, unlocked: ['pine'], species: 'pine', tags: null, strict: true, sound: 'none' };
+  if ((s.events || []).length) { // time blocks are now tasks with a start & end time
+    s.events.forEach(e => { if (!s.tasks.some(x => x.id === e.id)) s.tasks.push({ id: e.id, createdAt: e.createdAt || Date.now(), title: e.title, status: 'todo', priority: 3, due: e.date, time: e.start || '', endTime: e.end || '', areaId: e.areaId || '', color: e.color, block: true, recur: 'none', demo: e.demo }); });
+    s.deleted = s.deleted || {}; s.events.forEach(e => s.deleted['events|' + e.id] = Date.now());
+    s.events = [];
+  }
   return s;
 }
 function loadState() {
-  try { const r = localStorage.getItem(KEY); if (r) return migrate(JSON.parse(r)); } catch (e) { }
+  try {
+    const r = localStorage.getItem(KEY);
+    if (r) {
+      const d = JSON.parse(r);
+      // safety net: keep an untouched copy of the data from before this upgrade
+      if (!d.boards || d.v !== 3) { try { if (!localStorage.getItem(KEY + '.pre-v3')) localStorage.setItem(KEY + '.pre-v3', r); } catch (e) { } }
+      const m = migrate(d); m.v = 3; return m;
+    }
+  } catch (e) { }
   L = 'fa';
-  const s = seed(); s.settings.lang = L; if (L === 'en') s.settings.currency = '$'; return s;
+  const s = seed(); s.settings.lang = L; if (L === 'en') s.settings.currency = '$'; return migrate(s);
 }
 let S = loadState();
 L = S.settings.lang || 'fa';
@@ -187,6 +207,8 @@ const ICONS = {
   columns: '<rect x="3" y="3" width="5" height="18" rx="1.5"/><rect x="10" y="3" width="5" height="12" rx="1.5"/><rect x="17" y="3" width="4" height="15" rx="1.5"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  tree: '<path d="M12 22v-6"/><path d="M12 2 5 12h4l-3 4h12l-3-4h4z"/>',
+  brain: '<path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 1 5 3 3 0 0 0 4 3 3 3 0 0 0 3-1V4a3 3 0 0 0-3-1z"/><path d="M15 3a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-1 5 3 3 0 0 1-4 3 3 3 0 0 1-3-1"/><path d="M9 8h1M14 8h1M9 13h2M13 16h2"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
 };
 function ic(n, cls = '') { return `<svg class="svg ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`; }
@@ -201,7 +223,8 @@ function toast(msg, kind = '', action) {
 
 /* ---------- router ---------- */
 const NAV = [
-  ['sec_capture', [['dashboard', 'home'], ['inbox', 'inbox'], ['tasks', 'tasks'], ['calendar', 'calendar']]],
+  ['sec_capture', [['dashboard', 'home'], ['inbox', 'inbox'], ['tasks', 'tasks'], ['calendar', 'calendar'], ['focus', 'tree']]],
+  ['sec_mind', [['mind', 'brain']]],
   ['sec_organize', [['projects', 'folder'], ['content', 'film'], ['areas', 'compass'], ['goals', 'target'], ['notes', 'note']]],
   ['sec_life', [['habits', 'repeat'], ['finance', 'wallet'], ['health', 'heart'], ['people', 'users'], ['library', 'book'], ['lists', 'listcheck']]],
   ['sec_reflect', [['journal', 'pen'], ['review', 'review'], ['insights', 'chart'], ['graph', 'graph']]],
@@ -209,13 +232,13 @@ const NAV = [
 let route = { view: 'dashboard', arg: null };
 function parseHash() { const h = location.hash.replace(/^#\/?/, '').split('/'); route = { view: h[0] || 'dashboard', arg: h[1] ? decodeURIComponent(h[1]) : null }; }
 function go(view, arg) { location.hash = '#/' + view + (arg ? '/' + encodeURIComponent(arg) : ''); }
-window.addEventListener('hashchange', () => { parseHash(); closeDrawer(); render(); window.scrollTo({ top: 0 }); });
+window.addEventListener('hashchange', () => { parseHash(); closeDrawer(); if (typeof closePicker === 'function') closePicker(); render(); window.scrollTo(0, 0); const pg = $('#page'); if (pg) { pg.classList.remove('enter'); void pg.offsetWidth; pg.classList.add('enter'); } });
 
 /* ---------- shell ---------- */
 const UI = { capType: 'task', taskTab: 'today', taskArea: '', taskProj: '', taskQ: '', noteType: '', noteQ: '', libKind: '', calDay: null, finMonth: null, jDate: null, goalH: '' };
-function inboxCount() { return S.tasks.filter(x => x.inbox && x.status !== 'done').length + S.notes.filter(x => x.inbox).length; }
+function inboxCount() { return S.tasks.filter(x => x.inbox && isOpen(x)).length + S.notes.filter(x => x.inbox).length; }
 function sideHTML() {
-  const counts = { inbox: inboxCount(), tasks: S.tasks.filter(x => x.status !== 'done' && x.due && x.due <= today()).length };
+  const counts = { inbox: inboxCount(), tasks: S.tasks.filter(x => isOpen(x) && x.due && x.due <= today()).length };
   return `<div class="brand"><div class="brand-orb"></div><div><b>${t('appName')}</b><small>${t('tagline')}</small></div></div>
   ${NAV.map(([sec, items]) => `<div class="nav-sec">${t(sec)}</div>` + items.map(([v, icn]) =>
     `<a class="nav-item ${route.view === v ? 'on' : ''}" href="#/${v}">${ic(icn)}<span>${t('nav_' + v)}</span>${counts[v] ? `<span class="count">${counts[v]}</span>` : ''}</a>`).join('')).join('')}
@@ -235,13 +258,13 @@ function topHTML() {
   </div>`;
 }
 function bottomHTML() {
-  const items = [['dashboard', 'home'], ['tasks', 'tasks'], ['inbox', 'inbox'], ['calendar', 'calendar']];
-  return items.map(([v, i]) => `<button class="${route.view === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}<span>${t('nav_' + v)}</span></button>`).join('') +
+  const items = [['dashboard', 'home'], ['tasks', 'tasks'], ['focus', 'tree'], ['mind', 'brain']];
+  return items.map(([v, i]) => `<button class="${route.view === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}<span>${t(v === 'focus' ? 'nav_focus_short' : v === 'mind' ? 'sec_mind' : 'nav_' + v)}</span></button>`).join('') +
     `<button data-act="drawer">${ic('grid')}<span>${t('more')}</span></button>`;
 }
 const ACCENTS = { teal: ['#5eead4', '#2dd4bf', '#0f9f8a', '#0d8a78'], violet: ['#b9a2ff', '#9b7bff', '#7356d6', '#5f43c0'], gold: ['#e9c78f', '#d9a85c', '#b98328', '#a06f1c'], pink: ['#f3a6c8', '#e77fb0', '#c84f86', '#b23d73'], blue: ['#8ec5ff', '#5ea8f5', '#2f7fd4', '#1f6cbd'], green: ['#74e3a9', '#4cd08b', '#1f9d61', '#17824f'] };
 function applyDoc() {
-  const h = document.documentElement; h.lang = L; h.dir = L === 'fa' ? 'rtl' : 'ltr'; h.dataset.theme = S.settings.theme;
+  const h = document.documentElement; document.body.classList.toggle('mind-mode', route.view === 'mind' && !!route.arg); h.lang = L; h.dir = L === 'fa' ? 'rtl' : 'ltr'; h.dataset.theme = S.settings.theme;
   const ac = ACCENTS[S.settings.accent] || ACCENTS.teal, lt = S.settings.theme === 'light';
   if (S.settings.accent && S.settings.accent !== 'teal') { h.style.setProperty('--accent', lt ? ac[2] : ac[0]); h.style.setProperty('--accent2', lt ? ac[3] : ac[1]); } else { h.style.removeProperty('--accent'); h.style.removeProperty('--accent2'); }
   document.title = t('appName') + ' · ' + t('nav_' + route.view);
@@ -285,18 +308,30 @@ function confirmBox(msg, fn) {
 }
 const opt = (v, label, sel) => `<option value="${esc(v)}" ${String(sel ?? '') === String(v) ? 'selected' : ''}>${esc(label)}</option>`;
 function areaOpts(sel) { return opt('', t('none'), sel) + sortedAreas().map(a => opt(a.id, a.icon + ' ' + areaName(a), sel)).join(''); }
-function projOpts(sel) { return opt('', t('none'), sel) + S.projects.filter(p => p.status !== 'archived').map(p => opt(p.id, p.title, sel)).join(''); }
+function projTree(exclude) { // depth-first list [p, depth]
+  const out = [], kids = id => S.projects.filter(p => (p.parentId || '') === id && p.id !== exclude);
+  const walk = (id, d) => kids(id).forEach(p => { out.push([p, d]); if (d < 6) walk(p.id, d + 1); });
+  walk('', 0); S.projects.forEach(p => { if (p.id !== exclude && !out.some(([q]) => q === p) && !(exclude && isDescendant(p.id, exclude))) out.push([p, 0]); });
+  return out;
+}
+function isDescendant(id, ancestor) { let p = project(id), g = 0; while (p && p.parentId && g++ < 20) { if (p.parentId === ancestor) return true; p = project(p.parentId); } return false; }
+function projPath(id) { const a = []; let p = project(id), g = 0; while (p && g++ < 20) { a.unshift(p.title); p = p.parentId ? project(p.parentId) : null; } return a.join(' › '); }
+function projOpts(sel) { return opt('', t('none'), sel) + projTree().filter(([p]) => p.status !== 'archived' || p.id === sel).map(([p, d]) => opt(p.id, '\u2003'.repeat(d) + (d ? '↳ ' : '') + p.title, sel)).join(''); }
+function parentOpts(sel, self) { return opt('', t('no_parent'), sel) + projTree(self).filter(([p]) => !self || (p.id !== self && !isDescendant(p.id, self))).map(([p, d]) => opt(p.id, '\u2003'.repeat(d) + (d ? '↳ ' : '') + p.title, sel)).join(''); }
+const areasOf = x => x ? ((x.areaIds && x.areaIds.length) ? x.areaIds : (x.areaId ? [x.areaId] : [])) : [];
+const inArea = (x, id) => areasOf(x).includes(id);
+function areaChips(x) { return areasOf(x).map(areaChip).join(''); }
 function colorOpts(sel) { return `<div class="row" style="flex-wrap:wrap">${COLORS.map(c => `<label style="cursor:pointer"><input type="radio" name="color" value="${c}" ${sel === c ? 'checked' : ''} style="display:none"><span class="orb sm" style="--c:${c};outline:${sel === c ? '2px solid var(--text)' : 'none'};outline-offset:2px" data-pickc></span></label>`).join('')}</div>`; }
 
 /* Schema-driven form. fields: [key,type,label,extra] */
 const SCHEMA = {
-  tasks: () => [['title', 'text', 'f_title'], ['notes', 'textarea', 'f_notes'], ['_r1', 'row', [['due', 'date', 'f_due'], ['time', 'time', 'f_time']]],
+  tasks: () => [['title', 'text', 'f_title'], ['notes', 'textarea', 'f_notes'], ['_r1', 'row', [['due', 'date', 'f_due'], ['time', 'timerange', 'f_timerange']]],
     ['_r2', 'row', [['priority', 'select', 'f_priority', [1, 2, 3, 4].map(p => [p, t('p' + p)])], ['recur', 'select', 'f_recur', ['none', 'daily', 'weekly', 'monthly'].map(r => [r, t('recur_' + r)])]]],
-    ['_r3', 'row', [['areaId', 'area', 'f_area'], ['projectId', 'project', 'f_project']]], ['sub', 'subs', 'f_subtasks'], ['tags', 'text', 'f_tags']],
-  projects: () => [['title', 'text', 'f_title'], ['desc', 'textarea', 'f_desc'], ['_r1', 'row', [['areaId', 'area', 'f_area'], ['deadline', 'date', 'f_deadline']]],
-    ['status', 'select', 'f_status', ['active', 'paused', 'completed', 'archived'].map(s => [s, t('st_' + s)])], ['color', 'color', 'f_color']],
+    ['areaIds', 'areas', 'f_areas'], ['projectId', 'project', 'f_project'], ['sub', 'subs', 'f_subtasks'], ['tags', 'text', 'f_tags']],
+  projects: () => [['title', 'text', 'f_title'], ['desc', 'textarea', 'f_desc'], ['parentId', 'parent', 'f_parent'], ['areaIds', 'areas', 'f_areas'],
+    ['_r1', 'row', [['status', 'select', 'f_status', ['active', 'paused', 'completed', 'archived'].map(s => [s, t('st_' + s)])], ['deadline', 'date', 'f_deadline']]], ['color', 'color', 'f_color']],
   notes: () => [['title', 'text', 'f_title'], ['type', 'select', 'f_type', ['idea', 'note', 'report', 'resource', 'quote'].map(s => [s, t('type_' + s)])],
-    ['body', 'textarea', 'f_body', null, 12], ['_r1', 'row', [['areaId', 'area', 'f_area'], ['projectId', 'project', 'f_project']]], ['tags', 'text', 'f_tags']],
+    ['body', 'textarea', 'f_body', null, 12], ['areaIds', 'areas', 'f_areas'], ['projectId', 'project', 'f_project'], ['tags', 'text', 'f_tags']],
   habits: () => [['_r1', 'row', [['icon', 'text', 'f_icon'], ['title', 'text', 'f_title']]], ['areaId', 'area', 'f_area'], ['why', 'textarea', 'f_why'], ['color', 'color', 'f_color']],
   goals: () => [['title', 'text', 'f_title'], ['_r1', 'row', [['horizon', 'select', 'f_horizon', ['life', 'year', 'quarter', 'month'].map(s => [s, t('h_' + s)])], ['areaId', 'area', 'f_area']]],
     ['_r2', 'row', [['current', 'number', 'f_current'], ['target', 'number', 'f_target']]], ['_r3', 'row', [['unit', 'text', 'f_unit'], ['due', 'date', 'f_deadline']]], ['why', 'textarea', 'f_why'], ['color', 'color', 'f_color']],
@@ -322,6 +357,11 @@ function fieldHTML([k, type, label, extra, rows], it) {
   else if (type === 'select') inp = `<select class="select" name="${k}">${extra.map(([val, l]) => opt(val, l, v)).join('')}</select>`;
   else if (type === 'area') inp = `<select class="select" name="${k}">${areaOpts(v)}</select>`;
   else if (type === 'project') inp = `<select class="select" name="${k}">${projOpts(v)}</select>`;
+  else if (type === 'parent') inp = `<select class="select" name="${k}">${parentOpts(v, it.id)}</select>`;
+  else if (type === 'areas') { const cur = areasOf(it); inp = `<div class="area-pick">${sortedAreas().map(a => `<label class="apick ${cur.includes(a.id) ? 'on' : ''}" style="--c:${a.color}"><input type="checkbox" name="areaIds" value="${a.id}" ${cur.includes(a.id) ? 'checked' : ''}><span>${a.icon} ${esc(areaName(a))}</span></label>`).join('')}</div>`; }
+  else if (type === 'date') inp = pickField('date', k, v);
+  else if (type === 'time') inp = pickField('time', k, v);
+  else if (type === 'timerange') inp = pickField('timerange', k, v, it.endTime || '');
   else if (type === 'color') inp = colorOpts(v || COLORS[0]);
   else if (type === 'subs') inp = `<div class="subs" id="subsBox">${(v || []).map(subRow).join('')}</div><div class="add-inline" style="margin-top:4px">${ic('plus', 'sm')}<input id="subAdd" placeholder="${esc(t('add_subtask'))}"></div>`;
   else inp = `<input class="input" type="${type}" name="${k}" value="${esc(Array.isArray(v) ? v.join(', ') : v)}" ${type === 'number' ? 'step="any"' : ''}>`;
@@ -337,6 +377,7 @@ function openForm(coll, item, defaults = {}) {
     <div class="modal-f">${!isNew ? `<button type="button" class="btn danger" data-del>${ic('trash', 'sm')}${t('delete')}</button>` : ''}<span class="sp"></span>
     <button type="button" class="btn" data-close>${t('cancel')}</button><button class="btn primary" type="submit">${t('save')}</button></div></form>`, coll === 'notes' ? 'wide' : '');
   o.querySelectorAll('[data-close]').forEach(b => b.onclick = closeModal);
+  o.querySelectorAll('.apick input').forEach(cb => cb.onchange = () => cb.parentElement.classList.toggle('on', cb.checked));
   o.querySelectorAll('[data-pickc]').forEach(sp => sp.parentElement.onclick = () => setTimeout(() => {
     o.querySelectorAll('[data-pickc]').forEach(x => x.style.outline = x.parentElement.querySelector('input').checked ? '2px solid var(--text)' : 'none'); }));
   const sb_ = o.querySelector('#subsBox');
@@ -350,6 +391,7 @@ function openForm(coll, item, defaults = {}) {
   o.querySelector('#ef').onsubmit = e => {
     e.preventDefault(); const fd = new FormData(e.target); const data = {};
     for (const [k, v] of fd.entries()) data[k] = v;
+    if (e.target.querySelector('.area-pick')) { data.areaIds = fd.getAll('areaIds'); data.areaId = data.areaIds[0] || ''; }
     if (!String(data.title ?? data.name ?? 'x').trim() && coll !== 'tx') { e.target.querySelector('[name=title],[name=name]')?.focus(); return; }
     if (sb_) data.sub = [...sb_.querySelectorAll('.sub-row')].map(r => ({ id: r.dataset.sid, t: r.querySelector('.sub-in').value.trim(), d: r.classList.contains('done') ? 1 : 0 })).filter(z => z.t);
     ['priority', 'amount', 'current', 'target', 'progress', 'rating', 'freq'].forEach(k => { if (k in data) data[k] = Number(data[k]) || 0; });
@@ -358,12 +400,12 @@ function openForm(coll, item, defaults = {}) {
     if (coll === 'areas' && item && item.key && data.name === t('area_' + item.key)) delete data.name;
     if (isNew) {
       const obj = Object.assign({ id: uid(), createdAt: Date.now() }, defaults, data);
-      if (coll === 'tasks') obj.status = obj.status || 'todo';
+      if (coll === 'tasks') { obj.status = obj.status || 'todo'; if (!obj.areaId && !obj.due && !obj.projectId) obj.inbox = true; }
       if (coll === 'habits') obj.log = {};
       if (coll === 'lists') obj.items = [];
       if (coll === 'areas') { obj.score = 6; obj.order = S.areas.length; }
       S[coll].push(obj);
-    } else { Object.assign(item, data); if (item.areaId) delete item.inbox; }
+    } else { Object.assign(item, data); if (item.areaId || item.due) delete item.inbox; }
     closeModal(); commit(t('saved'));
   };
 }
@@ -376,14 +418,15 @@ function removeItem(coll, id) {
 /* ---------- tasks logic ---------- */
 function toggleTask(id) {
   const tk = S.tasks.find(x => x.id === id); if (!tk) return;
-  if (tk.status === 'done') { tk.status = 'todo'; delete tk.doneAt; }
+  if (tk.status === 'done' || tk.status === 'cancelled') { tk.status = 'todo'; delete tk.doneAt;
+    S.tasks = S.tasks.filter(x => !(x.recurFrom === tk.id && x.status === 'todo' && !x.u2)); }
   else {
     tk.status = 'done'; tk.doneAt = Date.now();
     if (tk.recur && tk.recur !== 'none') { // spawn next occurrence
       const base = tk.due || today(); let nd = base;
       if (tk.recur === 'daily') nd = addDays(base, 1); else if (tk.recur === 'weekly') nd = addDays(base, 7);
       else { const d = new Date(base + 'T00:00:00'); d.setMonth(d.getMonth() + 1); nd = iso(d); }
-      S.tasks.push(Object.assign({}, tk, { id: uid(), status: 'todo', due: nd, doneAt: undefined, createdAt: Date.now() }));
+      if (!S.tasks.some(x => x.recurFrom === tk.id)) { const nx = Object.assign({}, tk, { id: uid(), status: 'todo', due: nd, createdAt: Date.now(), recurFrom: tk.id, sub: (tk.sub || []).map(z => ({ ...z, d: 0 })), missed: [] }); delete nx.doneAt; delete nx.u; S.tasks.push(nx); }
     }
     sparkle();
   }

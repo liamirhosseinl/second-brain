@@ -39,7 +39,7 @@ function md(src, noteId) {
 const plain = s => String(s || '').replace(/[#>*=`]|\[\[|\]\]|- \[.\]/g, '').trim();
 function openNote(n) {
   const back = S.notes.filter(x => x.id !== n.id && (x.body || '').toLowerCase().includes('[[' + n.title.trim().toLowerCase() + ']]'));
-  const o = openModal(`<div class="modal-h"><span class="chip ${NOTE_C[n.type] || ''}">${ic(NOTE_IC[n.type] || 'note', 'sm')}${t('type_' + n.type)}</span>${areaChip(n.areaId)}${projChip(n.projectId)}<button class="icon-btn" data-close>${ic('x')}</button></div>
+  const o = openModal(`<div class="modal-h"><span class="chip ${NOTE_C[n.type] || ''}">${ic(NOTE_IC[n.type] || 'note', 'sm')}${t('type_' + n.type)}</span>${areaChips(n)}${projChip(n.projectId)}<button class="icon-btn" data-close>${ic('x')}</button></div>
     <h2 class="note-title">${esc(n.title)}</h2>${md(n.body, n.id)}
     ${(n.tags || []).length ? `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:14px">${n.tags.map(g => `<span class="chip">#${esc(g)}</span>`).join('')}</div>` : ''}
     ${back.length ? `<div class="backlinks"><div class="small muted">${ic('link', 'sm')} ${t('backlinks')}</div>${back.map(b => `<a class="wl" data-act="viewNote" data-id="${b.id}">${esc(b.title)}</a>`).join('')}</div>` : ''}
@@ -140,12 +140,12 @@ VIEWS.insights = () => {
   const ins = [];
   if (Math.max(...wd)) ins.push(tf('ins_best_day', { d: bestName }));
   if (avg(hi) && avg(lo)) ins.push(tf('ins_mood', { a: avg(hi), b: avg(lo) }));
-  const ov = S.tasks.filter(k => k.status !== 'done' && k.due && k.due < d).length; if (ov) ins.push(tf('ins_overdue', { n: ov }));
+  const ov = S.tasks.filter(k => isOpen(k) && k.due && k.due < d).length; if (ov) ins.push(tf('ins_overdue', { n: ov }));
   const neglected = sortedAreas().filter(a => (a.score || 0) <= 4); if (neglected.length) ins.push(tf('ins_low_area', { a: neglected.map(areaName).join('، ') }));
   if (inboxCount() > 7) ins.push(tf('ins_inbox', { n: inboxCount() }));
   const dueP = S.people.filter(dueContact).length; if (dueP) ins.push(tf('ins_people', { n: dueP }));
   if (!ins.length) ins.push(t('ins_great'));
-  const byArea = sortedAreas().map(a => ({ a, open: S.tasks.filter(k => k.areaId === a.id && k.status !== 'done').length, dn: S.tasks.filter(k => k.areaId === a.id && k.status === 'done' && k.doneAt && Date.now() - k.doneAt < 30 * 864e5).length }));
+  const byArea = sortedAreas().map(a => ({ a, open: S.tasks.filter(k => inArea(k, a.id) && isOpen(k)).length, dn: S.tasks.filter(k => inArea(k, a.id) && k.status === 'done' && k.doneAt && Date.now() - k.doneAt < 30 * 864e5).length }));
   const maxA = Math.max(1, ...byArea.map(x => x.open + x.dn));
   return pageH(t('nav_insights'), t('insights_desc')) +
     `<div class="stat3"><div class="card stat"><small>${ic('tasks', 'sm')}${t('ins_done30')}</small><b class="num">${sum(done)}</b></div><div class="card stat"><small>${ic('timer', 'sm')}${t('ins_focus30')}</small><b class="num">${fmtNum(sum(focus) / 60, 1)} <span class="small muted">${t('hours')}</span></b></div>
@@ -164,14 +164,14 @@ VIEWS.insights = () => {
 let PD_MODE = 'morning';
 function planDay(mode = PD_MODE) {
   PD_MODE = mode; const d = today(), tm = addDays(d, 1);
-  const row = (x, btns) => `<div class="task"><span class="prio p${x.priority || 3}"></span><div class="t-main"><div class="t-title">${esc(x.title)}</div><div class="t-meta">${dueChip(x.due)}${areaChip(x.areaId)}</div></div>${btns}</div>`;
+  const row = (x, btns) => `<div class="task"><span class="prio p${x.priority || 3}"></span><div class="t-main"><div class="t-title">${esc(x.title)}</div><div class="t-meta">${dueChip(x.due)}${areaChips(x)}</div></div>${btns}</div>`;
   const b = (act, id, label, cls = '') => `<button class="btn sm ${cls}" data-act="${act}" data-id="${id}">${label}</button>`;
   let body = '';
   if (mode === 'morning') {
-    const overdue = S.tasks.filter(x => x.status !== 'done' && x.due && x.due < d);
-    const inbox = S.tasks.filter(x => x.status !== 'done' && x.inbox);
-    const sugg = S.tasks.filter(x => x.status !== 'done' && !x.inbox && x.due !== d && !(x.due && x.due < d) && (((x.priority || 3) <= 2 && !x.due) || (x.due && diffDays(x.due, d) <= 3))).slice(0, 8);
-    const todayN = S.tasks.filter(x => x.due === d && x.status !== 'done').length;
+    const overdue = S.tasks.filter(x => isOpen(x) && x.due && x.due < d);
+    const inbox = S.tasks.filter(x => isOpen(x) && x.inbox);
+    const sugg = S.tasks.filter(x => isOpen(x) && !x.inbox && x.due !== d && !(x.due && x.due < d) && (((x.priority || 3) <= 2 && !x.due) || (x.due && diffDays(x.due, d) <= 3))).slice(0, 8);
+    const todayN = S.tasks.filter(x => x.due === d && isOpen(x)).length;
     body = `<div class="pd-step"><b>1 · ${t('c_highlight')}</b><div class="highlight" style="margin-top:8px">${ic('star')}<input data-in="highlight" value="${esc(S.daily[d]?.highlight || '')}" placeholder="${esc(t('highlight_ph'))}"></div></div>
       <div class="pd-step"><b>2 · ${t('overdue')}</b> <span class="chip red">${overdue.length}</span>${overdue.map(x => row(x, b('pdToday', x.id, t('today'), 'primary') + b('pdTomorrow', x.id, t('tomorrow')) + b('toggleTask', x.id, ic('check', 'sm')))).join('') || `<div class="small muted">✓</div>`}</div>
       <div class="pd-step"><b>3 · ${t('nav_inbox')}</b> <span class="chip">${inbox.length}</span>${inbox.map(x => row(x, b('pdToday', x.id, t('today'), 'primary') + b('pdTomorrow', x.id, t('tomorrow')) + b('del', x.id, ic('trash', 'sm')).replace('data-act="del"', 'data-act="del" data-coll="tasks"'))).join('') || `<div class="small muted">✓</div>`}</div>
@@ -179,7 +179,7 @@ function planDay(mode = PD_MODE) {
       <div class="pd-sum">${tf('pd_summary', { n: todayN })}${todayN > 7 ? ' ' + t('pd_toomany') : ''}</div>`;
   } else {
     const doneT = S.tasks.filter(x => x.status === 'done' && x.doneAt && iso(new Date(x.doneAt)) === d).length;
-    const left = S.tasks.filter(x => x.status !== 'done' && x.due && x.due <= d);
+    const left = S.tasks.filter(x => isOpen(x) && x.due && x.due <= d);
     const j = S.journal[d] || {};
     body = `<div class="pd-hero">🌙 ${tf('sd_done', { n: doneT, m: focusToday() })}</div>
       <div class="pd-step"><b>1 · ${t('sd_left')}</b> <span class="chip">${left.length}</span>${left.length > 1 ? `<button class="btn sm" style="margin-inline-start:8px" data-act="pdAllTomorrow">${t('sd_all_tomorrow')}</button>` : ''}${left.map(x => row(x, b('pdTomorrow', x.id, t('tomorrow')) + b('toggleTask', x.id, ic('check', 'sm')))).join('') || `<div class="small muted">✓ ${t('all_good')}</div>`}</div>
@@ -198,7 +198,7 @@ function calMonth() {
   const ref = UI.calDay || today(); const days = monthDays(ref); const d0 = today();
   const lead = (new Date(days[0] + 'T00:00:00').getDay() - (L === 'fa' ? 6 : 1) + 7) % 7;
   const heads = weekDays(days[0]).map(x => weekday(x, 'short'));
-  const cell = x => { const ev = S.events.filter(e => e.date === x), tk = S.tasks.filter(k => k.due === x && k.status !== 'done'), ct = S.content.filter(c => c.publishDate === x), bd = S.people.filter(p => p.birthday && p.birthday.slice(5) === x.slice(5));
+  const cell = x => { const ev = S.events.filter(e => e.date === x), tk = S.tasks.filter(k => k.due === x && isOpen(k)), ct = S.content.filter(c => c.publishDate === x), bd = S.people.filter(p => p.birthday && p.birthday.slice(5) === x.slice(5));
     const items = [...bd.map(p => ['🎂 ' + p.name, '#ffb27a']), ...ct.map(c => ['🎬 ' + c.title, '#f3a6c8']), ...ev.map(e => [e.title, e.color || '#5eead4']), ...tk.map(k => [k.title, area(k.areaId)?.color || '#b9a2ff'])];
     return `<button class="mcell ${x === d0 ? 'today' : ''} ${x === UI.calDay ? 'on' : ''}" data-act="calPick" data-d="${x}"><b class="num">${fmtDate(x, { day: 'numeric' })}</b>${items.slice(0, 3).map(([s, c]) => `<span class="mev" style="--c:${c}">${esc(s)}</span>`).join('')}${items.length > 3 ? `<span class="small muted">+${items.length - 3}</span>` : ''}</button>`; };
   return pageH(t('nav_calendar'), t('cal_desc'), `<button class="btn" data-act="calShiftM" data-n="-1">${ic('chevL', 'sm flip')}</button><button class="btn" style="min-width:140px">${monthLabel(ref)}</button><button class="btn" data-act="calShiftM" data-n="1">${ic('chevR', 'sm flip')}</button>` + newBtn('events', 'new_event', { date: ref })) +
@@ -226,7 +226,7 @@ function checkReminders() {
   let fired = {}; try { fired = JSON.parse(localStorage.getItem('sb.fired') || '{}'); } catch (e) { }
   const toM = s => { const [h, m] = (s || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
   const fire = (k, msg, atM) => { if (fired[k]) return; fired[k] = d; if (atM === undefined || nowM - atM <= 15) notifyUser(msg); };
-  S.tasks.forEach(x => { if (x.due === d && x.time && x.status !== 'done' && toM(x.time) <= nowM) fire('t' + x.id + d, '⏰ ' + x.title, toM(x.time)); });
+  S.tasks.forEach(x => { if (x.due === d && x.time && isOpen(x) && toM(x.time) <= nowM) fire('t' + x.id + d, '⏰ ' + x.title, toM(x.time)); });
   S.events.forEach(e => { if (e.date === d && e.start && toM(e.start) - 5 <= nowM && toM(e.start) >= nowM - 15) fire('e' + e.id + d, '📅 ' + e.title + ' · ' + e.start, toM(e.start) - 5); });
   S.people.forEach(p => { if (p.birthday && p.birthday.slice(5) === d.slice(5)) fire('b' + p.id + d, '🎂 ' + tf('bday_today', { n: p.name })); });
   S.subs.forEach(s => { if (s.next === d) fire('s' + s.id + d, '💳 ' + tf('sub_today', { n: s.title })); });

@@ -2,9 +2,9 @@
 'use strict';
 const SB_URL = 'https://zybsomlemngoonklmqor.supabase.co';
 const SB_KEY = 'sb_publishable_OBGmw4wDaFk8qv5hUsRGtA_T8Bzv970';
-const ARR = ['areas', 'tasks', 'projects', 'notes', 'habits', 'goals', 'events', 'tx', 'library', 'focus', 'content', 'people', 'lists', 'subs'];
+const ARR = ['areas', 'tasks', 'projects', 'notes', 'habits', 'goals', 'events', 'tx', 'library', 'focus', 'content', 'people', 'lists', 'subs', 'boards'];
 const MAPS = ['journal', 'health', 'daily', 'reviews'];
-const META = ['settings', 'budgets', 'scratch'];
+const META = ['settings', 'budgets', 'scratch', 'forest'];
 const DEVICE = (() => { try { let d = localStorage.getItem('sb.device'); if (!d) { d = uid(); localStorage.setItem('sb.device', d); } return d; } catch (e) { return uid(); } })();
 
 /* ---------- change stamping ---------- */
@@ -63,7 +63,10 @@ function syncBadgeHTML() {
   return `<button class="icon-btn sync-badge ${st}" id="syncBadge" data-act="go" data-v="settings" title="${esc(t('sync_' + st))}${SYNC.msg ? ' — ' + esc(SYNC.msg) : ''}" style="color:${col}">${ic('cloud')}<i style="background:${col}"></i></button>`;
 }
 function initSync() {
-  if (!window.supabase || !window.supabase.createClient) { SYNC.state = 'off'; return; }
+  if (!window.supabase || !window.supabase.createClient) { // lazy-load the client library after first paint
+    if (initSync.loading) return; initSync.loading = true;
+    const sc = document.createElement('script'); sc.src = 'vendor/supabase.js'; sc.async = true; sc.onload = () => { initSync.loading = false; initSync(); if (route.view === 'settings') render(); }; sc.onerror = () => { SYNC.state = 'off'; }; document.head.appendChild(sc); return;
+  }
   try {
     SYNC.client = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'secondbrain.auth' } });
     SYNC.client.auth.onAuthStateChange((ev, session) => {

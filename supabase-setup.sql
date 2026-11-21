@@ -40,6 +40,12 @@ create policy "own backups select" on public.brain_backups for select using (aut
 create policy "own backups insert" on public.brain_backups for insert with check (auth.uid() = user_id);
 create policy "own backups delete" on public.brain_backups for delete using (auth.uid() = user_id);
 
+-- 3b) Table privileges for logged-in users (new Supabase projects don't grant these automatically)
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.brain_state to authenticated;
+grant select, insert, delete on public.brain_backups to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 -- 4) Realtime: instant sync between phone and laptop
 do $$ begin
   alter publication supabase_realtime add table public.brain_state;

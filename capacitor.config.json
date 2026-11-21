@@ -1,0 +1,10 @@
+{
+  "appId": "com.onyq.secondbrain",
+  "appName": "مغز دوم",
+  "webDir": "www",
+  "android": { "backgroundColor": "#081311", "allowMixedContent": false },
+  "plugins": {
+    "LocalNotifications": { "smallIcon": "ic_stat_icon", "iconColor": "#5eead4" },
+    "StatusBar": { "backgroundColor": "#081311", "style": "DARK", "overlaysWebView": false }
+  }
+}

@@ -71,7 +71,7 @@ const ACT = {
   planDay: () => planDay('morning'), shutdown: () => planDay('evening'),
   pdToday: el => { const x = S.tasks.find(y => y.id === el.dataset.id); if (x) { x.due = today(); delete x.inbox; commit(); } },
   pdTomorrow: el => { const x = S.tasks.find(y => y.id === el.dataset.id); if (x) { x.due = addDays(today(), 1); delete x.inbox; commit(); } },
-  pdAllTomorrow: () => { S.tasks.filter(x => x.status !== 'done' && x.due && x.due <= today()).forEach(x => x.due = addDays(today(), 1)); commit(t('saved')); },
+  pdAllTomorrow: () => { S.tasks.filter(x => isOpen(x) && x.due && x.due <= today()).forEach(x => x.due = addDays(today(), 1)); commit(t('saved')); },
   voice: el => voiceInput(el, el.dataset.target || '#capIn'),
   syncIn: () => syncAuth('in'), syncUp: () => syncAuth('up'), syncOut: syncLogout, syncNow: () => fullSync(), syncBackups: () => listBackups(),
   setAccent: el => { S.settings.accent = el.dataset.v; commit(); },
@@ -118,7 +118,7 @@ document.addEventListener('keydown', e => {
     const id = tg.id; commit(); const n = document.getElementById(id); if (n) { n.value = ''; n.focus(); } return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
-  if (e.key === 'Escape') { closeModal(); closeDrawer(); return; }
+  if (e.key === 'Escape') { if ($('#picker')) { closePicker(); return; } closeModal(); closeDrawer(); return; }
   if (e.altKey && e.code === 'KeyN') { e.preventDefault(); quickCaptureModal(); return; }
   if (e.altKey && e.code === 'KeyT') { e.preventDefault(); ACT.newTask(); return; }
 });
@@ -138,6 +138,5 @@ document.addEventListener('dragover', e => { const col = e.target.closest?.('.kc
 document.addEventListener('drop', e => { const col = e.target.closest?.('.kcol'); if (!col || !DRAG) return; e.preventDefault();
   const it = S[col.dataset.dropColl]?.find(x => x.id === DRAG.id); if (it) moveCard(col.dataset.dropColl, it, col.dataset.dropField, col.dataset.dropVal); DRAG = null; });
 
-/* boot */
-stamp(true); parseHash(); render(); initSync();
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => { });
+
+

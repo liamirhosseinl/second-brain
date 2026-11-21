@@ -15,25 +15,29 @@ function drawGraph(cv, o = {}) {
     const ang = -Math.PI / 2 + i * 2 * Math.PI / as.length * (L === 'fa' ? -1 : 1);
     const n = { id: a.id, type: 'area', ref: a, label: a.icon + ' ' + areaName(a), ang, dist: .52, r: mini ? 8 : 12, c: a.color, seed: i * 1.7 };
     nodes.push(n); links.push({ a: me, b: n, c: a.color, main: true });
-    const kids = [...S.projects.filter(p => p.areaId === a.id && p.status !== 'archived').map(p => ({ type: 'project', ref: p, label: p.title, c: col('--violet') })),
-      ...S.goals.filter(g => g.areaId === a.id).map(g => ({ type: 'goal', ref: g, label: g.title, c: col('--accent') }))];
+    const kids = [...S.projects.filter(p => (p.parentId ? !project(p.parentId) : true) && (areasOf(p)[0] || 'a_work') === a.id && p.status !== 'archived').map(p => ({ type: 'project', ref: p, label: p.title, c: col('--violet') })),
+      ...S.goals.filter(g => inArea(g, a.id)).map(g => ({ type: 'goal', ref: g, label: g.title, c: col('--accent') }))];
     kids.forEach((k, j) => {
       const spread = Math.min(.9, .28 * (kids.length - 1));
       const ka = ang + (kids.length > 1 ? (j / (kids.length - 1) - .5) * spread : 0);
       const kn = Object.assign({ id: k.ref.id, ang: ka, dist: .8 + (j % 2) * .06, r: mini ? 4.5 : 7.5, seed: i + j * 3.1 }, k);
       nodes.push(kn); links.push({ a: n, b: kn, c: k.c });
       if (k.type === 'project') {
-        const arr = S.tasks.filter(x => x.projectId === k.ref.id && x.status !== 'done').slice(0, 10);
+        const subs = S.projects.filter(q => q.parentId === k.ref.id && q.status !== 'archived');
+        subs.forEach((q, m) => { const qn = { id: q.id, type: 'project', ref: q, label: q.title, c: q.color || col('--violet'), ang: ka + (m - (subs.length - 1) / 2) * .12, dist: 1.02 + (m % 2) * .07, r: mini ? 3.5 : 6, seed: m * 1.9 + j }; nodes.push(qn); links.push({ a: kn, b: qn, c: col('--violet') }); });
+        const arr = S.tasks.filter(x => x.projectId === k.ref.id && isOpen(x)).slice(0, 10);
         arr.forEach((tk, m) => { const tn = { id: tk.id, type: 'task', ref: tk, label: tk.title, ang: ka + (m - (arr.length - 1) / 2) * .055, dist: .97 + (m % 2) * .05, r: mini ? 1.8 : 3.2, c: col('--green'), seed: m * 2.3 + j };
           nodes.push(tn); links.push({ a: kn, b: tn, c: null }); });
       }
     });
-    const loose = S.tasks.filter(x => x.areaId === a.id && !x.projectId && x.status !== 'done').slice(0, 12);
+    const loose = S.tasks.filter(x => inArea(x, a.id) && !x.projectId && isOpen(x)).slice(0, 12);
     loose.forEach((tk, m) => { const tn = { id: tk.id, type: 'task', ref: tk, label: tk.title, orbit: n, th: m * 2 * Math.PI / Math.max(loose.length, 1) + i, rr: mini ? 16 : 30, r: mini ? 1.6 : 2.8, c: col('--green'), seed: m * 1.3 };
       nodes.push(tn); links.push({ a: n, b: tn, c: null }); });
   });
   const stars = Array.from({ length: mini ? 50 : 140 }, (_, i) => ({ x: (Math.sin(i * 12.9898) * 43758.5453) % 1, y: (Math.sin(i * 78.233) * 12543.123) % 1, r: (i % 5) * .25 + .3 }));
-  function size() { const r = cv.getBoundingClientRect(); dpr = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; }
+  const low = matchMedia('(max-width:980px),(pointer:coarse)').matches; let visible = true, lastT = 0;
+  const io = new IntersectionObserver(([en]) => visible = en.isIntersecting); io.observe(cv);
+  function size() { const r = cv.getBoundingClientRect(); dpr = Math.min(low ? 1.5 : 2, window.devicePixelRatio || 1); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; }
   size();
   const ro = new ResizeObserver(size); ro.observe(cv);
   function pos(n, time) {
@@ -51,7 +55,8 @@ function drawGraph(cv, o = {}) {
   function shade(c) { if (c[0] !== '#' || c.length < 7) return c; const n = parseInt(c.slice(1, 7), 16); const f = v => Math.round(v * .35); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
   function alpha(c, a) { if (c[0] !== '#' || c.length < 7) return c; const n = parseInt(c.slice(1, 7), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
   function frame(time) {
-    if (!cv.isConnected) { ro.disconnect(); return; }
+    if (!cv.isConnected) { ro.disconnect(); io.disconnect(); return; }
+    if (!visible || document.hidden || (low && time - lastT < 40)) { requestAnimationFrame(frame); return; } lastT = time;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     stars.forEach(s => { ctx.fillStyle = light ? 'rgba(10,60,50,.15)' : `rgba(200,255,240,${.15 + .15 * Math.sin(time * .001 + s.x * 20)})`; ctx.beginPath(); ctx.arc(Math.abs(s.x) * W, Math.abs(s.y) * H, s.r, 0, 7); ctx.fill(); });
     nodes.forEach(n => n._p = null); nodes.forEach(n => n._p = pos(n, time));
@@ -86,7 +91,7 @@ function drawGraph(cv, o = {}) {
         ctx.textAlign = 'center'; ctx.fillStyle = light ? '#0d2420' : 'rgba(231,243,240,.92)';
         ctx.save(); ctx.shadowColor = light ? 'transparent' : 'rgba(0,0,0,.8)'; ctx.shadowBlur = 6;
         ctx.fillText(label, p.x, p.y + r + (mini ? 10 : 14)); ctx.restore();
-        if (n.type === 'area' && !mini) { const cnt = S.tasks.filter(x => x.areaId === n.id && x.status !== 'done').length; ctx.font = `500 11px ${font}`; ctx.fillStyle = alpha(n.c, .9); ctx.fillText((n.ref.score || 0) + '/10 · ' + cnt + ' ' + t('tasks_count'), p.x, p.y + r + 31); }
+        if (n.type === 'area' && !mini) { const cnt = S.tasks.filter(x => inArea(x, n.id) && isOpen(x)).length; ctx.font = `500 11px ${font}`; ctx.fillStyle = alpha(n.c, .9); ctx.fillText((n.ref.score || 0) + '/10 · ' + cnt + ' ' + t('tasks_count'), p.x, p.y + r + 31); }
       }
     });
     requestAnimationFrame(frame);

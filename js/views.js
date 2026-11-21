@@ -20,16 +20,16 @@ const weekDays = s => Array.from({ length: 7 }, (_, i) => addDays(weekStart(s), 
 
 /* ---------- shared rows ---------- */
 function taskRow(x, o = {}) {
-  const done = x.status === 'done';
+  const done = !isOpen(x);
   return `<div class="task ${done ? 'done' : ''}">
     <span class="prio p${x.priority || 3}"></span>
     <button class="check round ${done ? 'on' : ''}" data-act="toggleTask" data-id="${x.id}" aria-label="done">${ic('check', 'sm')}</button>
     <div class="t-main" data-act="edit" data-coll="tasks" data-id="${x.id}">
       <div class="t-title">${esc(x.title)}</div>
-      <div class="t-meta">${x.time ? `<span class="chip ltr">${ic('clock', 'sm')}${esc(x.time)}</span>` : ''}${o.noDue ? '' : dueChip(x.due, done)}${o.noArea ? '' : areaChip(x.areaId)}${o.noProj ? '' : projChip(x.projectId)}
+      <div class="t-meta">${x.time ? `<span class="chip ltr">${ic('clock', 'sm')}${esc(x.time)}${x.endTime ? '–' + esc(x.endTime) : ''}</span>` : ''}${(x.missed || []).length ? `<span class="chip gold" title="${t('missed_btn')}">🙅 ${x.missed.length}</span>` : ''}${x.status === 'cancelled' ? `<span class="chip">${t('st_cancelled')}</span>` : ''}${o.noDue ? '' : dueChip(x.due, done)}${o.noArea ? '' : areaChips(x)}${o.noProj ? '' : projChip(x.projectId)}
       ${(x.sub || []).length ? `<span class="chip ${x.sub.every(z => z.d) ? 'teal' : ''}">${ic('list', 'sm')}<span class="num">${x.sub.filter(z => z.d).length}/${x.sub.length}</span></span>` : ''}${x.notes ? `<span class="chip">${ic('note', 'sm')}</span>` : ''}${x.recur && x.recur !== 'none' ? `<span class="chip">${ic('repeat', 'sm')}${t('recur_' + x.recur)}</span>` : ''}${(x.tags || []).map(g => `<span class="chip">#${esc(g)}</span>`).join('')}</div>
     </div>
-    <div class="t-acts"><button class="icon-btn sm" data-act="focusTask" data-id="${x.id}" title="${t('c_focus')}">${ic('timer', 'sm')}</button>
+     <div class="t-acts">${isOpen(x) && x.due && x.due <= today() ? `<button class="icon-btn sm" data-act="missed" data-id="${x.id}" title="${t('missed_btn')}">🙅</button>` : ''}<button class="icon-btn sm" data-act="focusTask" data-id="${x.id}" title="${t('c_focus')}">${ic('timer', 'sm')}</button>
     <button class="icon-btn sm" data-act="del" data-coll="tasks" data-id="${x.id}">${ic('trash', 'sm')}</button></div>
   </div>`;
 }
@@ -59,7 +59,7 @@ function radar(areas, size = 260) {
 VIEWS.dashboard = () => {
   const d = today(), h = new Date().getHours();
   const gk = h < 5 ? 'g_night' : h < 12 ? 'g_morning' : h < 17 ? 'g_noon' : h < 21 ? 'g_evening' : 'g_night';
-  const todays = S.tasks.filter(x => (x.due && x.due <= d && x.status !== 'done') || (x.status === 'done' && doneOn(x, d) && x.due && x.due <= d)).sort(PRI_SORT);
+  const todays = S.tasks.filter(x => (x.due && x.due <= d && isOpen(x)) || (x.status === 'done' && doneOn(x, d) && x.due && x.due <= d)).sort(PRI_SORT);
   const doneT = todays.filter(x => x.status === 'done').length;
   const hDone = S.habits.filter(x => x.log?.[d]).length;
   const mk = pmonth(d); const mtx = S.tx.filter(x => pmonth(x.date) === mk);
@@ -67,10 +67,7 @@ VIEWS.dashboard = () => {
   const daily = S.daily[d] || {};
   const types = ['task', 'idea', 'note', 'report', 'expense'];
   const prompts = t('prompts'); const prompt = prompts[(new Date().getDate()) % prompts.length];
-  const events = S.events.filter(e => e.date === d).sort((a, b) => (a.start || '').localeCompare(b.start || ''));
-  const timed = S.tasks.filter(x => x.due === d && x.time && x.status !== 'done');
-  const sched = [...events.map(e => ({ s: e.start, e: e.end, title: e.title, c: e.color || area(e.areaId)?.color || 'var(--accent)', coll: 'events', id: e.id })),
-    ...timed.map(x => ({ s: x.time, title: x.title, c: area(x.areaId)?.color || 'var(--violet)', coll: 'tasks', id: x.id }))].sort((a, b) => a.s.localeCompare(b.s));
+  const sched = S.tasks.filter(x => x.due === d && x.time).sort((a, b) => a.time.localeCompare(b.time)).map(x => ({ s: x.time, e: x.endTime, title: x.title, c: x.color || area(areasOf(x)[0])?.color || 'var(--accent)', coll: 'tasks', id: x.id, done: !isOpen(x) }));
   const j = S.journal[d] || {};
   const now = S.library.filter(x => x.status === 'progress').slice(0, 3);
   const goals = S.goals.slice(0, 4);
@@ -95,16 +92,10 @@ VIEWS.dashboard = () => {
   <section class="card s7"><div class="card-h"><h3>${ic('tasks')}${t('c_today')}</h3><div class="acts"><a class="btn ghost sm" href="#/tasks">${t('open_all')}</a></div></div>
     <div class="list">${todays.length ? todays.map(x => taskRow(x, { noDue: x.due === d })).join('') : emptyBox(t('empty_tasks'))}</div>${addInline('dashAdd', { due: d })}</section>
 
-  <section class="card s5" id="focusCard"><div class="card-h"><h3>${ic('timer')}${t('c_focus')}</h3><span class="chip teal" style="margin-inline-start:auto">${S.focus.filter(f => f.date === d).length} ${t('sessions')}</span></div>
-    <div class="focus-wrap"><div class="focus-ring" id="focusRing" style="--p:${100 - F.left / F.total * 100}"><div><div><b id="focusT">${mmss(F.left)}</b><small>${F.taskId && S.tasks.find(x => x.id === F.taskId) ? esc(S.tasks.find(x => x.id === F.taskId).title).slice(0, 26) : t('focus_on')}</small></div></div></div>
-    <div class="focus-ctrl">
-      <select class="select" data-ch="focusTask">${opt('', t('focus_on'), F.taskId)}${S.tasks.filter(x => x.status !== 'done').slice(0, 40).map(x => opt(x.id, x.title, F.taskId)).join('')}</select>
-      <div class="presets">${[15, 25, 50, 90].map(m => `<button class="btn sm ${F.total === m * 60 ? 'primary' : ''}" data-act="focusPreset" data-m="${m}"><span class="num">${m}</span>′</button>`).join('')}<button class="btn sm" data-act="focusPreset" data-m="5">${t('focus_break')}</button></div>
-      <div class="row"><button class="btn primary" id="focusBtn" data-act="focusToggle" style="flex:1">${ic('play')}${t('focus_start')}</button><button class="btn" data-act="focusReset" title="${t('focus_reset')}">${ic('rotate')}</button></div>
-    </div></div></section>
+  <section class="card s5 focus-card" id="focusCard"><div class="card-h"><h3>🌳 ${t('nav_focus')}</h3><span class="chip teal" style="margin-inline-start:auto">${t('fr_today_trees')}: <b class="num">${S.focus.filter(f => f.date === d && !f.dead && f.minutes).length}</b></span></div>${focusCardHTML(true)}</section>
 
-  <section class="card s4"><div class="card-h"><h3>${ic('calendar')}${t('c_schedule')}</h3><div class="acts"><button class="icon-btn sm" data-act="new" data-coll="events" data-def='${JSON.stringify({ date: d })}'>${ic('plus', 'sm')}</button></div></div>
-    ${sched.length ? sched.map(s => `<div class="sched-item" style="--c:${s.c}" data-act="edit" data-coll="${s.coll}" data-id="${s.id}"><span class="tm">${esc(s.s)}${s.e ? ' – ' + esc(s.e) : ''}</span><span class="bar"></span><span>${esc(s.title)}</span></div>`).join('') : emptyBox()}</section>
+  <section class="card s4"><div class="card-h"><h3>${ic('calendar')}${t('c_schedule')}</h3><div class="acts"><button class="icon-btn sm" data-act="new" data-coll="tasks" data-def='${JSON.stringify({ due: d, time: '09:00', endTime: '10:00', priority: 3, recur: 'none' })}'>${ic('plus', 'sm')}</button></div></div>
+    ${sched.length ? sched.map(s => `<div class="sched-item ${s.done ? 'done' : ''}" style="--c:${s.c}" data-act="edit" data-coll="${s.coll}" data-id="${s.id}"><span class="tm">${esc(s.s)}${s.e ? ' – ' + esc(s.e) : ''}</span><span class="bar"></span><span>${esc(s.title)}</span></div>`).join('') : emptyBox()}</section>
 
   <section class="card s4"><div class="card-h"><h3>${ic('repeat')}${t('c_habits')}</h3><div class="acts"><a class="btn ghost sm" href="#/habits">${t('open_all')}</a></div></div>
     ${S.habits.length ? S.habits.map(x => `<div class="habit-mini" style="--c:${x.color}"><span style="font-size:18px">${esc(x.icon || '•')}</span><span style="flex:1">${esc(x.title)}</span><span class="chip">${ic('bolt', 'sm')}<span class="num">${streak(x)}</span></span><button class="hcell ${x.log?.[d] ? 'on' : ''}" style="margin:0" data-act="habit" data-id="${x.id}" data-d="${d}">${ic('check', 'sm')}</button></div>`).join('') : emptyBox()}</section>
@@ -125,7 +116,8 @@ VIEWS.dashboard = () => {
   <section class="card s4"><div class="card-h"><h3>${ic('book')}${t('c_now')}</h3><div class="acts"><a class="btn ghost sm" href="#/library">${t('open_all')}</a></div></div>
     ${now.length ? now.map(x => `<div class="row" style="margin-bottom:12px;cursor:pointer" data-act="edit" data-coll="library" data-id="${x.id}"><div class="cover" style="--c:${x.color || '#5eead4'};width:38px;height:52px;font-size:16px">${KIND_ICON[x.kind]}</div><div style="flex:1;min-width:0"><div style="font-weight:500">${esc(x.title)}</div><div class="progress" style="margin-top:6px"><i style="width:${x.progress || 0}%"></i></div></div></div>`).join('') : emptyBox()}</section>
 
-  <section class="card s4"><div class="card-h"><h3>${ic('edit')}${t('c_scratch')}</h3></div><textarea class="textarea" id="scratch" data-in="scratch" rows="6" placeholder="${esc(t('scratch_ph'))}">${esc(S.scratch)}</textarea></section>
+  <section class="card s4"><div class="card-h"><h3>${ic('edit')}${t('c_scratch')}</h3><span class="small muted scratch-state" id="scrState" style="margin-inline-start:auto">${S.scratch ? '✓ ' + t('saved') : ''}</span></div><textarea class="textarea" id="scratch" data-in="scratch" rows="6" placeholder="${esc(t('scratch_ph'))}">${esc(S.scratch)}</textarea>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary sm" data-act="scrSave">${ic('check', 'sm')}${t('save')}</button><button class="btn sm" data-act="scrNote">${ic('note', 'sm')}${t('scr_to_note')}</button><button class="btn sm" data-act="scrTask">${ic('tasks', 'sm')}${t('scr_to_task')}</button><button class="btn ghost sm" data-act="scrClear" style="margin-inline-start:auto">${ic('trash', 'sm')}</button></div></section>
   ${dashExtra()}
   </div>`;
 };
@@ -136,7 +128,7 @@ function afterRenderHook(view, fn) { (VIEWS['_after_' + view] = VIEWS['_after_' 
 
 /* =================== INBOX =================== */
 VIEWS.inbox = () => {
-  const items = [...S.tasks.filter(x => x.inbox && x.status !== 'done').map(x => ({ x, coll: 'tasks' })), ...S.notes.filter(x => x.inbox).map(x => ({ x, coll: 'notes' }))]
+  const items = [...S.tasks.filter(x => x.inbox && isOpen(x)).map(x => ({ x, coll: 'tasks' })), ...S.notes.filter(x => x.inbox).map(x => ({ x, coll: 'notes' }))]
     .sort((a, b) => b.x.createdAt - a.x.createdAt);
   const tIcon = { task: 'tasks', idea: 'bulb', note: 'note', report: 'pen', resource: 'link', quote: 'quote' };
   return pageH(t('nav_inbox'), t('inbox_desc'), `<button class="btn primary" data-act="quickCapture">${ic('sparkle', 'sm')}${t('sc_capture')}</button>`) +
@@ -151,12 +143,12 @@ VIEWS.inbox = () => {
 /* =================== TASKS =================== */
 VIEWS.tasks = () => {
   const d = today(); const tab = UI.taskTab;
-  let list = S.tasks.filter(x => (!UI.taskArea || x.areaId === UI.taskArea) && (!UI.taskProj || x.projectId === UI.taskProj) && (!UI.taskQ || x.title.toLowerCase().includes(UI.taskQ.toLowerCase())));
-  const open = list.filter(x => x.status !== 'done');
+  let list = S.tasks.filter(x => (!UI.taskArea || inArea(x, UI.taskArea)) && (!UI.taskProj || projIds(UI.taskProj).includes(x.projectId)) && (!UI.taskQ || x.title.toLowerCase().includes(UI.taskQ.toLowerCase())));
+  const open = list.filter(x => isOpen(x));
   let body = '';
   const group = (title, arr, o) => arr.length ? `<div class="group-h">${title}<span class="chip">${arr.length}</span></div>` + arr.sort(PRI_SORT).map(x => taskRow(x, o)).join('') : '';
   if (tab === 'today') {
-    body = group(t('overdue'), open.filter(x => x.due && x.due < d)) + group(t('today'), list.filter(x => x.due === d && (x.status !== 'done' || doneOn(x, d))), { noDue: true });
+    body = group(t('overdue'), open.filter(x => x.due && x.due < d)) + group(t('today'), list.filter(x => x.due === d && (isOpen(x) || doneOn(x, d))), { noDue: true });
     body = body || emptyBox(t('empty_tasks'));
   } else if (tab === 'upcoming') {
     for (let i = 1; i <= 14; i++) { const day = addDays(d, i); body += group(`${relDay(day)} · ${fmtDate(day)}`, open.filter(x => x.due === day), { noDue: true }); }
@@ -175,7 +167,7 @@ VIEWS.tasks = () => {
     body = `<div class="matrix">${Q.map(([f, k, c]) => { const arr = open.filter(f).sort(PRI_SORT); return `<div class="card"><div class="q-h"><i style="background:${c}"></i>${t(k)}<span class="chip" style="margin-inline-start:auto">${arr.length}</span></div><div class="list">${arr.map(x => taskRow(x, { noArea: true })).join('') || emptyBox()}</div></div>`; }).join('')}</div>`;
   }
   const tabs = ['today', 'upcoming', 'all', 'board', 'done', 'matrix'];
-  if (tab === 'board') body = kanban('tasks', 'status', [['todo', '#8ec5ff'], ['doing', '#e9c78f'], ['done', '#74e3a9']].map(([k, c]) => ({ k, c, l: t('st_' + k), add: k === 'todo' ? { status: 'todo', priority: 3, recur: 'none' } : null })), list.filter(x => x.status !== 'done' || (x.doneAt && Date.now() - x.doneAt < 7 * 864e5)), x => `<div data-act="edit" data-coll="tasks" data-id="${x.id}" style="cursor:pointer"><div class="row" style="gap:8px"><span class="prio p${x.priority || 3}" style="height:18px"></span><b style="flex:1;line-height:1.6">${esc(x.title)}</b></div><div class="t-meta" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${dueChip(x.due, x.status === 'done')}${areaChip(x.areaId)}${projChip(x.projectId)}${(x.sub || []).length ? `<span class="chip">${x.sub.filter(z => z.d).length}/${x.sub.length}</span>` : ''}</div></div>`);
+  if (tab === 'board') body = kanban('tasks', 'status', [['todo', '#8ec5ff'], ['doing', '#e9c78f'], ['done', '#74e3a9']].map(([k, c]) => ({ k, c, l: t('st_' + k), add: k === 'todo' ? { status: 'todo', priority: 3, recur: 'none' } : null })), list.filter(x => isOpen(x) || (x.doneAt && Date.now() - x.doneAt < 7 * 864e5)), x => `<div data-act="edit" data-coll="tasks" data-id="${x.id}" style="cursor:pointer"><div class="row" style="gap:8px"><span class="prio p${x.priority || 3}" style="height:18px"></span><b style="flex:1;line-height:1.6">${esc(x.title)}</b></div><div class="t-meta" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${dueChip(x.due, x.status === 'done')}${areaChips(x)}${projChip(x.projectId)}${(x.sub || []).length ? `<span class="chip">${x.sub.filter(z => z.d).length}/${x.sub.length}</span>` : ''}</div></div>`);
   return pageH(t('nav_tasks'), '', newBtn('tasks', 'new_task', { due: tab === 'today' ? d : '' })) +
     `<div class="toolbar"><div class="tabs">${tabs.map(x => `<button class="tab ${tab === x ? 'on' : ''}" data-act="ui" data-k="taskTab" data-v="${x}">${x === 'matrix' ? ic('grid', 'sm') : x === 'board' ? ic('columns', 'sm') : ''}${t('t_' + x)}</button>`).join('')}</div>
     <select class="select" data-ch="ui" data-k="taskArea">${opt('', '🌐 ' + t('f_area'), UI.taskArea)}${sortedAreas().map(a => opt(a.id, a.icon + ' ' + areaName(a), UI.taskArea)).join('')}</select>
@@ -188,27 +180,29 @@ VIEWS.tasks = () => {
 VIEWS.calendar = () => {
   if (UI.calMode === 'month') return calMonth();
   const day = UI.calDay || today(); const days = weekDays(day); const d0 = today();
-  const evs = S.events.filter(e => e.date === day);
   const tks = S.tasks.filter(x => x.due === day);
   const H0 = 6, H1 = 24, HH = 56;
   const toMin = s => { const [h, m] = (s || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
-  const blocks = [...evs.map(e => ({ ...e, c: e.color || area(e.areaId)?.color || '#5eead4', coll: 'events' })),
-    ...tks.filter(x => x.time).map(x => ({ id: x.id, title: x.title, start: x.time, end: '', c: area(x.areaId)?.color || '#b9a2ff', coll: 'tasks' }))]
-    .map(b => { const s = toMin(b.start), e = b.end ? Math.max(toMin(b.end), s + 20) : s + 30; return { ...b, top: (s - H0 * 60) / 60 * HH, h: (e - s) / 60 * HH }; })
-    .filter(b => b.top + b.h > 0);
+  const blocks = tks.filter(x => x.time).map(x => ({ id: x.id, title: x.title, start: x.time, end: x.endTime || '', c: x.color || area(areasOf(x)[0])?.color || '#b9a2ff', coll: 'tasks', done: !isOpen(x) }))
+    .map(b => { const s = toMin(b.start), e = b.end ? Math.max(toMin(b.end), s + 20) : s + 30; return { ...b, s, e, top: (s - H0 * 60) / 60 * HH, h: (e - s) / 60 * HH }; })
+    .filter(b => b.top + b.h > 0).sort((a, b) => a.s - b.s);
+  // side-by-side layout for overlapping blocks
+  let grp = [], gEnd = -1; const flush = () => { const cols = []; grp.forEach(b => { let c = cols.findIndex(end => end <= b.s); if (c < 0) { c = cols.length; cols.push(0); } cols[c] = b.e; b.col = c; }); grp.forEach(b => b.ncol = cols.length); grp = []; };
+  blocks.forEach(b => { if (b.s >= gEnd) { flush(); gEnd = -1; } grp.push(b); gEnd = Math.max(gEnd, b.e); }); flush();
   const nowM = new Date().getHours() * 60 + new Date().getMinutes();
-  return pageH(t('nav_calendar'), t('cal_desc'), `<button class="btn" data-act="calShift" data-n="-7">${ic('chevL', 'sm flip')}</button><button class="btn" data-act="calToday">${t('go_today')}</button><button class="btn" data-act="calShift" data-n="7">${ic('chevR', 'sm flip')}</button>` + newBtn('events', 'new_event', { date: day })) +
-    `${calModeTabs()}<div class="week-strip">${days.map(x => { const n = S.events.filter(e => e.date === x).length + S.tasks.filter(k => k.due === x && k.status !== 'done').length;
+  return pageH(t('nav_calendar'), t('cal_desc'), `<button class="btn" data-act="calShift" data-n="-7">${ic('chevL', 'sm flip')}</button><button class="btn" data-act="calToday">${t('go_today')}</button><button class="btn" data-act="calShift" data-n="7">${ic('chevR', 'sm flip')}</button>` + newBtn('tasks', 'new_event', { due: day, time: '09:00', endTime: '10:00', priority: 3, recur: 'none' })) +
+    `${calModeTabs()}<div class="week-strip">${days.map(x => { const n = S.tasks.filter(k => k.due === x && isOpen(k)).length;
       return `<button class="day-btn ${x === day ? 'on' : ''} ${x === d0 ? 'today' : ''}" data-act="calDay" data-d="${x}"><small>${weekday(x, 'short')}</small><b class="num">${fmtDate(x, { day: 'numeric' })}</b><div class="dots">${'<i></i>'.repeat(Math.min(n, 4))}</div></button>`; }).join('')}</div>
     <div class="bento"><section class="card s8" style="padding:8px 0"><div class="card-h" style="padding:8px 16px"><h3>${ic('clock')}${fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' })}</h3><span class="chip" style="margin-inline-start:auto">${fmtDateAlt(day)}</span></div>
       <div class="timeline">${Array.from({ length: H1 - H0 }, (_, i) => `<div class="tl-hour" data-act="newEventAt" data-h="${H0 + i}" data-d="${day}"><span>${String(H0 + i).padStart(2, '0')}:00</span></div>`).join('')}
-      <div class="tl-blocks">${blocks.map(b => `<div class="tl-block" style="--c:${b.c};top:${b.top}px;height:${Math.max(24, b.h - 2)}px" data-act="edit" data-coll="${b.coll}" data-id="${b.id}"><b>${esc(b.title)}</b><span class="ltr small">${esc(b.start)}${b.end ? ' – ' + esc(b.end) : ''}</span></div>`).join('')}</div>
+      <div class="tl-blocks">${blocks.map(b => `<div class="tl-block ${b.done ? 'done' : ''}" style="--c:${b.c};top:${b.top}px;height:${Math.max(24, b.h - 2)}px;width:calc(${100 / b.ncol}% - 4px);inset-inline-start:calc(${100 / b.ncol * b.col}%)" data-act="edit" data-coll="${b.coll}" data-id="${b.id}"><b>${b.done ? '✓ ' : ''}${esc(b.title)}</b><span class="ltr small">${esc(b.start)}${b.end ? ' – ' + esc(b.end) : ''}</span></div>`).join('')}</div>
       ${day === d0 && nowM > H0 * 60 ? `<div class="tl-now" style="top:${(nowM - H0 * 60) / 60 * HH}px"></div>` : ''}</div></section>
     <section class="card s4"><div class="card-h"><h3>${ic('tasks')}${t('nav_tasks')}</h3></div><div class="list">${tks.sort(PRI_SORT).map(x => taskRow(x, { noDue: true })).join('') || emptyBox()}</div>${addInline('calAdd', { due: day })}</section></div>`;
 };
 
 /* =================== PROJECTS =================== */
-const projStats = p => { const ts = S.tasks.filter(x => x.projectId === p.id); const dn = ts.filter(x => x.status === 'done').length; return { total: ts.length, done: dn, pct: ts.length ? Math.round(dn / ts.length * 100) : (p.status === 'completed' ? 100 : 0) }; };
+const projIds = id => { const out = [id]; S.projects.forEach(q => { if (q.id !== id && isDescendant(q.id, id)) out.push(q.id); }); return out; };
+const projStats = p => { const ids = projIds(p.id); const ts = S.tasks.filter(x => ids.includes(x.projectId) && x.status !== 'cancelled'); const dn = ts.filter(x => x.status === 'done').length; return { total: ts.length, done: dn, pct: ts.length ? Math.round(dn / ts.length * 100) : (p.status === 'completed' ? 100 : 0) }; };
 VIEWS.projects = () => {
   if (route.arg) { const p = project(route.arg); if (p) return projectDetail(p); }
   const tab = UI.projTab || 'active';
@@ -218,14 +212,14 @@ VIEWS.projects = () => {
     <div class="cards">${list.map(p => { const st = projStats(p); const dl = p.deadline ? diffDays(p.deadline, today()) : null;
       return `<div class="card pcard" data-act="go" data-v="projects" data-arg="${p.id}"><div class="row"><span class="orb sm" style="--c:${p.color || '#5eead4'}"></span><h4 style="flex:1">${esc(p.title)}</h4><span class="chip">${t('st_' + p.status)}</span></div>
         ${p.desc ? `<div class="small muted" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(p.desc)}</div>` : ''}
-        <div class="meta">${areaChip(p.areaId)}${p.deadline ? `<span class="chip ${dl < 0 ? 'red' : dl < 7 ? 'gold' : ''}">${ic('flag', 'sm')}${fmtDate(p.deadline)}</span>` : ''}</div>
+        <div class="meta">${areaChips(p)}${p.deadline ? `<span class="chip ${dl < 0 ? 'red' : dl < 7 ? 'gold' : ''}">${ic('flag', 'sm')}${fmtDate(p.deadline)}</span>` : ''}</div>
         <div><div class="row small" style="justify-content:space-between;margin-bottom:4px"><span class="muted">${t('progress')}</span><span class="num">${st.done}/${st.total} · ${st.pct}%</span></div><div class="progress"><i style="width:${st.pct}%"></i></div></div></div>`; }).join('') || `<div class="card">${emptyBox()}</div>`}</div>`;
 };
 function projectDetail(p) {
   const st = projStats(p); const ts = S.tasks.filter(x => x.projectId === p.id).sort(PRI_SORT); const ns = S.notes.filter(x => x.projectId === p.id);
   return `<div class="page-h"><button class="icon-btn" data-act="go" data-v="projects">${ic('chevR', 'flip')}</button><span class="orb" style="--c:${p.color || '#5eead4'}"></span><div><h1>${esc(p.title)}</h1><p>${esc(p.desc || '')}</p></div>
     <div class="acts"><button class="btn" data-act="edit" data-coll="projects" data-id="${p.id}">${ic('edit', 'sm')}${t('edit')}</button></div></div>
-    <div class="stat3"><div class="card stat"><small>${t('f_status')}</small><b style="font-size:18px">${t('st_' + p.status)}</b></div><div class="card stat"><small>${t('f_area')}</small><b style="font-size:16px">${areaChip(p.areaId) || '—'}</b></div>
+    <div class="stat3"><div class="card stat"><small>${t('f_status')}</small><b style="font-size:18px">${t('st_' + p.status)}</b></div><div class="card stat"><small>${t('f_area')}</small><b style="font-size:16px">${areaChips(p) || '—'}</b></div>
     <div class="card stat"><small>${t('f_deadline')}</small><b style="font-size:18px">${p.deadline ? fmtDate(p.deadline) : '—'}</b></div><div class="card stat"><small>${t('progress')}</small><b class="num">${st.pct}%</b><div class="progress"><i style="width:${st.pct}%"></i></div></div></div>
     <div class="bento"><section class="card s7"><div class="card-h"><h3>${ic('tasks')}${t('tasks_of_project')}</h3></div>${addInline('projAdd', { projectId: p.id, areaId: p.areaId })}<div class="list" style="margin-top:6px">${ts.map(x => taskRow(x, { noProj: true, noArea: true })).join('') || emptyBox()}</div></section>
     <section class="card s5"><div class="card-h"><h3>${ic('note')}${t('notes_of_project')}</h3><div class="acts"><button class="icon-btn sm" data-act="new" data-coll="notes" data-def='${esc(JSON.stringify({ projectId: p.id, areaId: p.areaId, type: 'note' }))}'>${ic('plus', 'sm')}</button></div></div>
@@ -239,14 +233,14 @@ VIEWS.areas = () => {
   return pageH(t('nav_areas'), t('areas_desc'), newBtn('areas', 'new_area', { icon: '✨', color: COLORS[3] })) +
     `<div class="bento"><section class="card s4"><div class="card-h"><h3>${ic('compass')}${t('c_wheel')}</h3></div>${radar(as, 300)}</section>
     <div class="s8"><div class="cards">${as.map(a => {
-      const np = S.projects.filter(p => p.areaId === a.id && p.status === 'active').length, nt = S.tasks.filter(x => x.areaId === a.id && x.status !== 'done').length, nn = S.notes.filter(x => x.areaId === a.id).length;
+      const np = S.projects.filter(p => inArea(p, a.id) && p.status === 'active').length, nt = S.tasks.filter(x => inArea(x, a.id) && isOpen(x)).length, nn = S.notes.filter(x => inArea(x, a.id)).length;
       return `<div class="card area-card" style="--c:${a.color}"><div class="area-top"><span class="orb" style="--c:${a.color}">${a.icon}</span><div style="flex:1;cursor:pointer" data-act="go" data-v="areas" data-arg="${a.id}"><h4>${esc(areaName(a))}</h4><div class="small muted"><span class="num">${np}</span> ${t('projects_count')} · <span class="num">${nt}</span> ${t('tasks_count')} · <span class="num">${nn}</span> ${t('notes_count')}</div></div>
         <button class="icon-btn sm" data-act="edit" data-coll="areas" data-id="${a.id}">${ic('edit', 'sm')}</button></div>
         <div><div class="row small" style="justify-content:space-between;margin-bottom:6px"><span class="muted">${t('f_score')}</span><b class="num" style="color:${a.color}">${a.score || 0}/10</b></div>
         <div class="score">${Array.from({ length: 10 }, (_, i) => `<button class="${(a.score || 0) > i ? 'on' : ''}" data-act="areaScore" data-id="${a.id}" data-n="${i + 1}">${i + 1}</button>`).join('')}</div></div></div>`; }).join('')}</div></div></div>`;
 };
 function areaDetail(a) {
-  const ps = S.projects.filter(p => p.areaId === a.id), ts = S.tasks.filter(x => x.areaId === a.id && x.status !== 'done').sort(PRI_SORT), ns = S.notes.filter(x => x.areaId === a.id), hs = S.habits.filter(x => x.areaId === a.id), gs = S.goals.filter(x => x.areaId === a.id);
+  const ps = S.projects.filter(p => inArea(p, a.id)), ts = S.tasks.filter(x => inArea(x, a.id) && isOpen(x)).sort(PRI_SORT), ns = S.notes.filter(x => inArea(x, a.id)), hs = S.habits.filter(x => inArea(x, a.id)), gs = S.goals.filter(x => inArea(x, a.id));
   return `<div class="page-h"><button class="icon-btn" data-act="go" data-v="areas">${ic('chevR', 'flip')}</button><span class="orb" style="--c:${a.color}">${a.icon}</span><div><h1>${esc(areaName(a))}</h1><p class="num">${a.score || 0}/10</p></div><div class="acts"><button class="btn" data-act="edit" data-coll="areas" data-id="${a.id}">${ic('edit', 'sm')}${t('edit')}</button></div></div>
   <div class="bento"><section class="card s6"><div class="card-h"><h3>${ic('tasks')}${t('nav_tasks')}</h3></div>${addInline('areaAdd', { areaId: a.id })}<div class="list" style="margin-top:6px">${ts.map(x => taskRow(x, { noArea: true })).join('') || emptyBox()}</div></section>
   <section class="card s6"><div class="card-h"><h3>${ic('folder')}${t('nav_projects')}</h3></div>${ps.map(p => `<div class="task" style="cursor:pointer" data-act="go" data-v="projects" data-arg="${p.id}"><span class="orb sm" style="--c:${p.color || a.color};width:18px;height:18px"></span><div class="t-main"><div class="t-title">${esc(p.title)}</div></div><span class="chip num">${projStats(p).pct}%</span></div>`).join('') || emptyBox()}
@@ -270,7 +264,7 @@ VIEWS.goals = () => {
 const NOTE_IC = { idea: 'bulb', note: 'note', report: 'pen', resource: 'link', quote: 'quote' };
 const NOTE_C = { idea: 'gold', note: 'teal', report: 'violet', resource: '', quote: '' };
 function noteCard(n) {
-  return `<div class="card note-card" data-act="viewNote" data-id="${n.id}"><div class="row"><span class="chip ${NOTE_C[n.type] || ''}">${ic(NOTE_IC[n.type] || 'note', 'sm')}${t('type_' + n.type)}</span>${areaChip(n.areaId)}
+  return `<div class="card note-card" data-act="viewNote" data-id="${n.id}"><div class="row"><span class="chip ${NOTE_C[n.type] || ''}">${ic(NOTE_IC[n.type] || 'note', 'sm')}${t('type_' + n.type)}</span>${areaChips(n)}
     <button class="icon-btn sm" style="margin-inline-start:auto;${n.pinned ? 'color:var(--gold)' : ''}" data-act="pin" data-id="${n.id}">${ic('pin', 'sm')}</button></div>
     <b style="font-size:15px;line-height:1.6">${esc(n.title)}</b>${n.body ? `<div class="body">${esc(plain(n.body))}</div>` : ''}
     <div class="row small muted" style="flex-wrap:wrap;gap:6px">${(n.tags || []).map(g => `<span class="chip">#${esc(g)}</span>`).join('')}<span style="margin-inline-start:auto">${fmtDate(iso(new Date(n.createdAt)))}</span></div></div>`;
@@ -335,7 +329,7 @@ VIEWS.health = () => {
     `<div class="bento">${M('water', 'droplet', '#8ec5ff', t('glasses'), `<div class="water-glasses">${Array.from({ length: 10 }, (_, i) => `<button class="${(h.water || 0) > i ? 'on' : ''}" data-act="water" data-n="${i + 1}"></button>`).join('')}</div>`)}
     ${M('sleep', 'moon', '#b9a2ff', t('hours'), stepper('sleep', .5))}${M('steps', 'activity', '#74e3a9', '', stepper('steps', 500))}
     ${M('workout', 'dumbbell', '#f3a6c8', t('min'), stepper('workout', 10))}${M('weight', 'scale', '#e9c78f', t('kg'), stepper('weight', .1))}
-    <section class="card s4"><div class="card-h"><h3>${ic('heart')}${t('c_habits')}</h3></div>${S.habits.filter(x => x.areaId === 'a_health').map(x => `<div class="habit-mini" style="--c:${x.color}"><span>${esc(x.icon)}</span><span style="flex:1">${esc(x.title)}</span><button class="hcell ${x.log?.[d] ? 'on' : ''}" style="margin:0" data-act="habit" data-id="${x.id}" data-d="${d}">${ic('check', 'sm')}</button></div>`).join('') || emptyBox()}</section></div>`;
+    <section class="card s4"><div class="card-h"><h3>${ic('heart')}${t('c_habits')}</h3></div>${S.habits.filter(x => inArea(x, 'a_health')).map(x => `<div class="habit-mini" style="--c:${x.color}"><span>${esc(x.icon)}</span><span style="flex:1">${esc(x.title)}</span><button class="hcell ${x.log?.[d] ? 'on' : ''}" style="margin:0" data-act="habit" data-id="${x.id}" data-d="${d}">${ic('check', 'sm')}</button></div>`).join('') || emptyBox()}</section></div>`;
 };
 
 /* =================== LIBRARY =================== */
