@@ -275,7 +275,7 @@ function plantGiveUp() {
   confirmBox(t('fr_giveup_q'), () => {
     const mins = Math.floor((F.total - F.left) / 60);
     clearInterval(F.iv); F.running = false; ambStop();
-    if (F.mode === 'focus') S.focus.push({ id: uid(), date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: true, at: Date.now() });
+    if (F.mode === 'focus') S.focus.push({ id: uid(), start: F.startedAt || undefined, task: (S.tasks.find(x => x.id === F.taskId) || {}).title || '', date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: true, at: Date.now() });
     F.left = F.total; F.startedAt = 0; commit(t('fr_dead'));
   });
 }
@@ -284,7 +284,7 @@ focusTick = function () {
   const was = F.running; F.left = Math.max(0, Math.round((F.end - Date.now()) / 1000));
   if (F.left <= 0 && was) {
     clearInterval(F.iv); F.running = false; ambStop();
-    if (F.mode === 'focus') { const mins = Math.round(F.total / 60); S.focus.push({ id: uid(), date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: false, at: Date.now() }); S.forest.coins = (S.forest.coins || 0) + mins; }
+    if (F.mode === 'focus') { const mins = Math.round(F.total / 60); S.focus.push({ id: uid(), start: F.startedAt || undefined, task: (S.tasks.find(x => x.id === F.taskId) || {}).title || '', date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: false, at: Date.now() }); S.forest.coins = (S.forest.coins || 0) + mins; }
     F.left = F.total; F.startedAt = 0; save(); sparkle(); setTimeout(sparkle, 260);
     notifyUser(F.mode === 'focus' ? t('fr_grown') : t('fr_break_done'));
     if (F.mode === 'focus') { F.mode = 'break'; F.total = F.left = 5 * 60; } else { F.mode = 'focus'; F.total = F.left = (S.forest.lastMin || 25) * 60; }
@@ -296,7 +296,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { F.hiddenAt = Date.now(); return; }
   if (F.running && F.mode === 'focus' && S.forest.strict && F.hiddenAt && Date.now() - F.hiddenAt > 10000 && F.left > 0) {
     const mins = Math.floor((F.total - F.left) / 60); clearInterval(F.iv); F.running = false; ambStop();
-    S.focus.push({ id: uid(), date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: true, at: Date.now() });
+    S.focus.push({ id: uid(), start: F.startedAt || undefined, task: (S.tasks.find(x => x.id === F.taskId) || {}).title || '', date: today(), minutes: mins, taskId: F.taskId, tag: F.tag || '', species: S.forest.species, dead: true, at: Date.now() });
     F.left = F.total; F.startedAt = 0; save(); render();
     const o = openModal(`<div class="od-hero">${treeSVG(S.forest.species, .8, true, 90)}</div><h2 class="od-title">${t('fr_withered')}</h2><p class="od-sub">${t('fr_withered_sub')}</p><div class="od-acts"><button class="btn primary" data-close>${t('od_ok_btn')}</button></div>`, 'od-modal');
     o.querySelector('[data-close]').onclick = closeModal;
@@ -332,6 +332,17 @@ function prompt0() {
   o.querySelector('[data-close]').onclick = closeModal;
   o.querySelector('#ntOk').onclick = () => { const v = $('#ntName').value.trim(); if (!v) return; S.forest.tags = [...ftags(), { id: uid(), name: v, color: COLORS[ftags().length % 8] }]; closeModal(); commit(); };
 }
+function treeHistoryHTML(limit, title) {
+  const list = S.focus.filter(f => f.minutes > 0 || f.dead).slice().sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, limit);
+  const hm = ms => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `<div class="f-history"><div class="fh-head"><b>🌲 ${title || t('fr_history')}</b><span class="small muted">${tf('fr_hist_count', { n: S.focus.filter(f => !f.dead && f.minutes > 0).length })}</span></div>
+    ${list.length ? list.map(f => { const end = f.at || 0, start = f.start || (end ? end - f.minutes * 60000 : 0); const tg = ftags().find(g => g.id === f.tag);
+      const task = f.task || (S.tasks.find(x => x.id === f.taskId) || {}).title || '';
+      return `<div class="fh-row ${f.dead ? 'dead' : ''}"><div class="fh-tree">${treeSVG(f.species || 'pine', 1, f.dead, 40)}</div>
+        <div class="fh-main"><div class="fh-title">${esc(task || (tg ? tg.name : t('fr_free_focus')))}</div>
+        <div class="fh-meta"><span class="ltr">${start ? hm(start) : '--:--'} → ${end ? hm(end) : '--:--'}</span><span>· ${durLabel(f.minutes) || '0'}</span>${tg && task ? `<span class="ftag on" style="--c:${tg.color}">${esc(tg.name)}</span>` : ''}</div></div>
+        <div class="fh-side"><span class="chip ${f.dead ? 'red' : 'teal'}">${f.dead ? '🥀 ' + t('fr_withered_s') : '🌳 ' + t('fr_grown_s')}</span><small class="muted">${relDay(f.date)}</small></div></div>`; }).join('') : `<div class="empty small">${t('fr_hist_empty')}</div>`}</div>`;
+}
 function focusCardHTML(compact) {
   const today_ = S.focus.filter(f => f.date === today());
   const alive = today_.filter(f => !f.dead).length, mins = today_.filter(f => !f.dead).reduce((a, f) => a + f.minutes, 0);
@@ -349,7 +360,7 @@ function focusCardHTML(compact) {
       </div>
       <button class="btn primary f-btn" data-act="plant">🌱 ${t('fr_plant')}</button>
       <div class="f-stats small muted"><span>🌳 <b class="num">${alive}</b></span><span>⏱ <b class="num">${mins}</b> ${t('min')}</span><span>🪙 <b class="num">${S.forest.coins || 0}</b></span>${compact ? `<a href="#/focus" class="btn ghost sm" style="margin-inline-start:auto">${t('fr_open')}</a>` : ''}</div>
-    </div></div>`;
+    </div></div>${compact ? treeHistoryHTML(8) : ''}`;
 }
 VIEWS.focus = () => {
   const per = UI.fPeriod || 'day'; const d = today();
@@ -376,6 +387,7 @@ VIEWS.focus = () => {
       <div class="forest-land">${land}${placed}</div>
       <div class="stat3" style="margin:14px 0 0"><div class="kpi"><small>⏱ ${t('fr_total')}</small><b class="num">${durLabel(mins) || 0}</b></div><div class="kpi"><small>🌳 ${t('fr_alive')}</small><b class="num pos">${alive.length}</b></div><div class="kpi"><small>🥀 ${t('fr_dead_n')}</small><b class="num neg">${dead.length}</b></div><div class="kpi"><small>🎯 ${t('fr_success')}</small><b class="num">${ses.length ? Math.round(alive.length / ses.length * 100) : 0}%</b></div></div>
       ${Object.keys(byTag).length ? `<div class="card-h" style="margin-top:16px"><h3>${ic('chart')}${t('fr_by_tag')}</h3></div>${Object.entries(byTag).sort((a, b) => b[1] - a[1]).map(([k, v]) => { const g = ftags().find(x => x.id === k) || { name: t('ftag_other'), color: '#74e3a9' }; return `<div class="catbar"><span class="small">${esc(g.name)}</span><div class="progress"><i style="width:${v / mt * 100}%;background:${g.color}"></i></div><span class="small num muted">${durLabel(v)}</span></div>`; }).join('')}` : ''}</section>
+    <section class="card s12">${treeHistoryHTML(40, t('fr_history_all'))}</section>
     <section class="s12"><div class="card-h"><h3>🛒 ${t('fr_shop')}</h3><span class="small muted" style="margin-inline-start:8px">${t('fr_shop_desc')}</span></div><div class="shop">${shop}</div></section></div>`;
 };
 
